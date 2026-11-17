@@ -1,3 +1,47 @@
-/* You can add global styles to this file, and also import other style files */
+@import "tailwindcss";
 
-@import 'tailwindcss';
+.fc-toolbar-title {
+  @apply capitalize text-gray-800;
+}
+
+.fc .fc-button-primary {
+  @apply !bg-rose-500 !border-rose-500 hover:!bg-rose-600 hover:!border-rose-600 !transition-colors !shadow-sm;
+}
+
+.fc .fc-button-primary:not(:disabled):active,
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  @apply !bg-rose-700 !border-rose-700;
+}
+
+.fc .fc-button-primary:disabled {
+  @apply !bg-rose-300 !border-rose-300 !opacity-70;
+}
+
+.fc .fc-day-today {
+  @apply !bg-rose-50;
+}
+
+.fc .fc-header-toolbar {
+  @apply !flex-col md:!flex-row !gap-4;
+}
+
+.fc .fc-header-toolbar {
+  @apply !flex-col !items-start !gap-3 !mb-4;
+}
+
+.fc .fc-toolbar-chunk:last-child {
+  @apply !flex !flex-row !items-center !gap-3;
+}
+
+.fc .fc-button-group {
+  @apply !mr-1;
+}
+
+.fc-toolbar-title {
+  @apply capitalize text-gray-800 !text-xl md:!text-2xl;
+  text-transform: lowercase; 
+}
+.fc-toolbar-title::first-letter {
+  text-transform: uppercase; 
+}
+
