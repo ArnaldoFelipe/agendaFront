@@ -1,6 +1,7 @@
 import { Component, inject, OnInit, signal, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
+import { forkJoin } from 'rxjs'; 
 
 import { FullCalendarModule, FullCalendarComponent } from '@fullcalendar/angular';
 import { CalendarOptions } from '@fullcalendar/core';
@@ -12,6 +13,8 @@ import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import { ModalAgendamento } from './components/modal-agendamento/modal-agendamento';
 import { Agendamento } from './models/agendamento.model';
 import { AgendamentoService } from './services/agendamento';
+import { BloqueioService } from './services/bloqueio';  
+import { Bloqueio } from './models/bloqueio.model';
 
 @Component({
   selector: 'app-root',
@@ -23,7 +26,9 @@ export class App implements OnInit {
   
   @ViewChild('calendario') calendarComponent!: FullCalendarComponent;
   private agendamentoService = inject(AgendamentoService);
+  private bloqueioService = inject(BloqueioService); 
   private cdr = inject(ChangeDetectorRef);
+  private timeoutAlerta: any;
 
   protected readonly title = signal('agenda-front');
   modalAberto = signal(false);
@@ -34,6 +39,7 @@ export class App implements OnInit {
   tipoAlerta = signal<'sucesso' | 'erro' >('erro');
   
   agendamentoEdicao = signal<Agendamento | null>(null); 
+  bloqueioEdicao = signal<Bloqueio | null>(null); 
 
   isMobile = window.innerWidth < 768;
   mesAtual = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -60,8 +66,26 @@ export class App implements OnInit {
     
     eventContent: (arg) => {
       const dados = arg.event.extendedProps['dadosCompletos'];
+      const tipo = arg.event.extendedProps['tipo'] || 'AGENDAMENTO'; 
+      
       if (!dados) return true;
 
+     
+      if (tipo === 'BLOQUEIO') {
+        const textoMotivo = dados.motivo ? `⛔ ${dados.motivo}` : '⛔ BLOQUEADO';
+        return {
+          html: `
+            <div class="w-full h-full flex items-center justify-center p-1 rounded overflow-hidden shadow-sm"
+                 style="background: repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px); border: 1px solid #d1d5db; color: #4b5563;">
+              <span class="font-bold text-[10px] uppercase text-center bg-white/80 px-2 py-0.5 rounded-md shadow-sm truncate max-w-full">
+                ${textoMotivo}
+              </span>
+            </div>
+          `
+        };
+      }
+
+      
       const inicio = arg.event.start?.getTime() || 0;
       const fim = arg.event.end?.getTime() || 0;
       const duracaoMinutos = (fim - inicio) / (1000 * 60);
@@ -69,7 +93,6 @@ export class App implements OnInit {
       
       const isVisaoDia = arg.view.type === 'timeGridDay';
 
-      
       if (arg.view.type === 'dayGridMonth') {
         return {
           html: `
@@ -86,7 +109,6 @@ export class App implements OnInit {
           `
         };
       }
-
       
       if (duracaoMinutos <= 30) {
         return {
@@ -105,7 +127,6 @@ export class App implements OnInit {
           `
         };
       }
-
       
       return {
         html: `
@@ -165,24 +186,21 @@ export class App implements OnInit {
     slotMaxTime: '22:00:00',
     allDaySlot: true,
     selectable: true,
-    selectAllow: (selectInfo) => selectInfo.start.getTime() > new Date().getTime(),
+    selectAllow: (selectInfo) => {
+      const noFuturo = selectInfo.start.getTime() > new Date().getTime();
+      const estaBloqueado = this.verificarSeEstaBloqueado(selectInfo.start, selectInfo.end);
+      return noFuturo && !estaBloqueado;
+    },
     selectLongPressDelay: 100,
 
     dateClick: (info) => {
-      if(info.view.type === 'dayGridMonth'){
+      if (info.view.type === 'dayGridMonth') {
         this.mudarVisao('timeGridDay');
         this.calendarComponent.getApi().gotoDate(info.date);
         return;
       }
 
-      const agora = new Date();
-      if (info.date.getTime() > agora.getTime()) {
-        this.agendamentoEdicao.set(null); 
-        this.dataParaOModal.set(info.date);
-        this.modalAberto.set(true);
-      } else {
-        this.exibirAviso('Não é possível Agendar/Bloquear em horários passados.');
-      }
+      this.tentarAbrirModal(info.date);
     },
     
     datesSet: this.sincronizarMes.bind(this),
@@ -194,14 +212,19 @@ export class App implements OnInit {
     this.carregarAgendamentos();
   }
 
+  
   carregarAgendamentos() {
-    this.agendamentoService.listarAgendamentos().subscribe({
-      next: (agendamentosDoBanco) => {
-        const agendamentosOrdenados = [...agendamentosDoBanco].sort((a, b) => {
+    forkJoin({
+      agendamentos: this.agendamentoService.listarAgendamentos(),
+      bloqueios: this.bloqueioService.listarBloqueios()
+    }).subscribe({
+      next: (resultado) => {
+        
+        const agendamentosOrdenados = [...resultado.agendamentos].sort((a, b) => {
           return new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime();
         });
 
-        const eventosParaOCalendario = agendamentosOrdenados.map((agendamento, index, array) => {
+        const eventosAgendamentos = agendamentosOrdenados.map((agendamento, index, array) => {
           let cor = '#3b82f6';
           if (agendamento.status === 'PENDENTE') cor = '#f59e0b';
           if (agendamento.status === 'CONFIRMADO') cor = '#22c55e';
@@ -219,38 +242,57 @@ export class App implements OnInit {
           }
 
           return {
-            id: agendamento.id.toString(),
+            id: 'AG-' + agendamento.id, // Ajuda a não conflitar com ID de bloqueio
             title: `${agendamento.clienteNome} (${agendamento.status}) ${agendamento.servico ? ' - ' + agendamento.servico : ''}`,
             start: agendamento.dataHora,
             end: dataFim.toISOString(),
             backgroundColor: cor,
             borderColor: cor,
-            extendedProps: { dadosCompletos: agendamento }
+            extendedProps: { 
+              tipo: 'AGENDAMENTO', 
+              dadosCompletos: agendamento 
+            }
           };
         });
+
+        
+        const eventosBloqueios = resultado.bloqueios.map(bloqueio => ({
+          id: 'BL-' + bloqueio.id,
+          start: bloqueio.horaInicio,
+          end: bloqueio.horaFim,
+          allDay: bloqueio.diaTodo,
+          backgroundColor: '#e5e7eb',
+          borderColor: '#d1d5db',
+          extendedProps: {
+            tipo: 'BLOQUEIO',
+            dadosCompletos: bloqueio
+          }
+        }));
+
+        // Junta as duas listas e passa para o calendário
+        const todosEventos = [...eventosAgendamentos, ...eventosBloqueios];
 
         if (this.calendarComponent && this.calendarComponent.getApi()) {
           const api = this.calendarComponent.getApi();
           api.removeAllEventSources(); 
-          api.addEventSource(eventosParaOCalendario); 
+          api.addEventSource(todosEventos); 
         } else {
           this.calendarOptions = {
             ...this.calendarOptions,
-            events: eventosParaOCalendario
+            events: todosEventos
           };
         }
 
         this.cdr.detectChanges(); 
       },
       error: (erro) => {
-        console.error('Erro ao listar agendamentos:', erro);
+        console.error('Erro ao listar agenda completa:', erro);
         this.exibirAviso('Falha ao carregar a agenda do servidor.', 'erro');
       } 
     });
   }
 
   mudarVisao(novaVisao: string) {
-
     const telaCelular = window.innerWidth < 768;
     if (novaVisao === 'semanaDinamica' && this.isMobile) {
       novaVisao = 'tresDias';
@@ -290,32 +332,99 @@ export class App implements OnInit {
       return;
     }
 
-    const agora = new Date();
-    if (selectInfo.start.getTime() > agora.getTime()) {
-      this.agendamentoEdicao.set(null); 
-      this.dataParaOModal.set(selectInfo.start);
-      this.modalAberto.set(true);
-    } else {
-      this.exibirAviso('Não é possível agendar em horários que já passaram.');
-    }
+    this.tentarAbrirModal(selectInfo.start, selectInfo.end);
   }
 
   handleEventClick(info: any) {
-    const agendamentoClicado = info.event.extendedProps.dadosCompletos;
-    this.agendamentoEdicao.set(agendamentoClicado);
-    this.dataParaOModal.set(new Date(agendamentoClicado.dataHora));
+    const tipo = info.event.extendedProps.tipo;
+    const dados = info.event.extendedProps.dadosCompletos;
+
+    // Protege para não quebrar o modal de cliente caso seja um bloqueio
+    if (tipo === 'BLOQUEIO') {
+      this.agendamentoEdicao.set(null);
+      this.bloqueioEdicao.set(dados);
+      this.dataParaOModal.set(info.event.start || new Date(dados.horaInicio));
+      this.modalAberto.set(true);
+      return;
+    }
+
+  
+    this.bloqueioEdicao.set(null);
+    this.agendamentoEdicao.set(dados);
+    this.dataParaOModal.set(new Date(dados.dataHora));
     this.modalAberto.set(true);
   }
 
   exibirAviso(mensagem: string, tipo: 'sucesso' | 'erro' = 'erro') {
+    if (this.timeoutAlerta) {
+      clearTimeout(this.timeoutAlerta);
+    }
+
     this.mensagemAlerta.set(mensagem);
-    this.tipoAlerta.set(tipo); 
+    this.tipoAlerta.set(tipo);
     this.mostrarAlerta.set(true);
-    this.cdr.detectChanges(); 
-    
-    setTimeout(() => {
+    this.cdr.detectChanges();
+
+    this.timeoutAlerta = setTimeout(() => {
       this.mostrarAlerta.set(false);
       this.cdr.detectChanges();
     }, 3000);
+  }
+
+  private verificarSeEstaBloqueado(inicioSelecionado: Date, fimSelecionado?: Date): boolean {
+    const api = this.calendarComponent?.getApi();
+    if (!api) return false;
+
+    const bloqueios = api.getEvents().filter(e => e.extendedProps['tipo'] === 'BLOQUEIO');
+    const inicio = inicioSelecionado.getTime();
+    const fim = fimSelecionado ? fimSelecionado.getTime() : inicio + (60 * 60 * 1000);
+
+    return bloqueios.some(bloqueio => {
+      if (!bloqueio.start) return false;
+
+      if (bloqueio.allDay) {
+        const mesmaDataInicio =
+          bloqueio.start.getDate() === inicioSelecionado.getDate() &&
+          bloqueio.start.getMonth() === inicioSelecionado.getMonth() &&
+          bloqueio.start.getFullYear() === inicioSelecionado.getFullYear();
+
+        const fimAjustado = new Date(fim - 1);
+        const mesmaDataFim =
+          bloqueio.start.getDate() === fimAjustado.getDate() &&
+          bloqueio.start.getMonth() === fimAjustado.getMonth() &&
+          bloqueio.start.getFullYear() === fimAjustado.getFullYear();
+
+        return mesmaDataInicio || mesmaDataFim;
+      }
+
+      const inicioBloqueio = bloqueio.start.getTime();
+      const fimBloqueio = bloqueio.end ? bloqueio.end.getTime() : inicioBloqueio + (60 * 60 * 1000);
+      return inicio < fimBloqueio && fim > inicioBloqueio;
+    });
+  }
+
+  private tentarAbrirModal(inicio: Date, fim?: Date) {
+    // Impede duplo disparo se o modal já estiver abrindo
+    if (this.modalAberto()) return;
+
+    const api = this.calendarComponent?.getApi();
+    const agora = new Date();
+
+    if (inicio.getTime() <= agora.getTime()) {
+      api?.unselect();
+      this.exibirAviso('Não é possível Agendar/Bloquear em horários passados.', 'erro');
+      return;
+    }
+
+    if (this.verificarSeEstaBloqueado(inicio, fim)) {
+      api?.unselect();
+      this.exibirAviso('Este horário (ou dia) encontra-se fechado.', 'erro');
+      return;
+    }
+
+    this.agendamentoEdicao.set(null);
+    this.bloqueioEdicao.set(null);
+    this.dataParaOModal.set(inicio);
+    this.modalAberto.set(true);
   }
 }

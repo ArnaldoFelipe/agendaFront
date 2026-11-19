@@ -20,7 +20,7 @@ export class AgendamentoService {
     return this.http.get<Agendamento[]>(this.apiUrl);
   }
 
-  atualizarAgendamento(id: string, dados:any): Observable<Agendamento>{
+  atualizarAgendamento(id: string, dados:Partial<Agendamento>): Observable<Agendamento>{
     return this.http.patch<Agendamento>(`${this.apiUrl}/${id}`, dados);
   }
 
