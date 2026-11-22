@@ -161,8 +161,7 @@
         <button
           type="submit"
           [disabled]="(modo() === 'AGENDAR' && formAgendamento.invalid) || (modo() === 'BLOQUEAR' && formBloqueio.invalid)"
-          [class]="modo() === 'AGENDAR' ? 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500' : 'bg-gray-800 hover:bg-gray-900 focus:ring-gray-800'"
-          class="px-4 py-2 text-white rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 outline-none">
+          class="px-4 py-2 text-white bg-rose-500 hover:bg-rose-600 focus:ring-rose-500 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 outline-none">
           Salvar
         </button>
       </div>

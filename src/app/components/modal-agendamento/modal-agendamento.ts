@@ -5,6 +5,7 @@ import { AgendamentoService } from '../../services/agendamento';
 import { Agendamento } from '../../models/agendamento.model';
 import { BloqueioService } from '../../services/bloqueio';
 import { Bloqueio } from '../../models/bloqueio.model';
+import { mensagemDaApi } from '../../utils/erro-api';
 
 @Component({
   selector: 'app-modal-agendamento',
@@ -107,8 +108,7 @@ export class ModalAgendamento implements OnInit {
 
   private emitirErro(erro: any, mensagemPadrao: string) {
     console.error(erro);
-    const msg = erro.error?.message || mensagemPadrao;
-    this.erro.emit(Array.isArray(msg) ? msg[0] : msg);
+    this.erro.emit(mensagemDaApi(erro, mensagemPadrao));
   }
 
   fecharModal() {
