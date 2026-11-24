@@ -504,16 +504,28 @@ export class Agenda implements OnInit {
       return 'Não há horários livres neste mês.';
     }
 
-    const nomesDosDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const diasDaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
-    const linhas = dias.map(dia => {
+    // Uma linha por dia, com os intervalos na mesma linha. Uma linha em branco separa as semanas
+    // (de segunda a domingo), antes de cada segunda-feira.
+    const linhas: string[] = [];
+    dias.forEach(dia => {
       const [, mes, diaDoMes] = dia.data.split('-');
-      const diaDaSemana = nomesDosDias[new Date(dia.data + 'T12:00:00').getDay()];
-      const intervalos = dia.intervalos.map(i => `${i.inicio} às ${i.fim}`).join(', ');
-      return `${diaDaSemana} ${diaDoMes}/${mes}: ${intervalos}`;
+      const diaSemana = new Date(dia.data + 'T12:00:00').getDay();
+
+      if (diaSemana === 1 && linhas.length > 0) {
+        linhas.push('');
+      }
+
+      // Hífen sem quebra (U+2011) entre os horários: impede a quebra de linha no meio de um intervalo.
+      const intervalos = dia.intervalos.map(i => `${i.inicio}‑${i.fim}`).join(' · ');
+      linhas.push(`*${diasDaSemana[diaSemana]} ${diaDoMes}/${mes}:* ${intervalos}`);
     });
 
-    return ['Horários disponíveis 📅', ...linhas].join('\n');
+    const nomeMes = meses[Number(dias[0].data.split('-')[1]) - 1];
+    return [`*Horários disponíveis – ${nomeMes}* 📅`, '', ...linhas].join('\n');
   }
 
   compartilharHorariosLivres() {
