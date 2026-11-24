@@ -2,6 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { Bloqueio, CreateBloqueioDto } from '../models/bloqueio.model';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root',
@@ -9,7 +10,7 @@ import { Bloqueio, CreateBloqueioDto } from '../models/bloqueio.model';
 export class BloqueioService {
 
   private http = inject(HttpClient);
-  private apiUrl = 'http://localhost:3000/bloqueios';
+  private apiUrl = `${environment.apiUrl}/bloqueios`;
 
   listarBloqueios(): Observable<Bloqueio[]>{
     return this.http.get<Bloqueio[]>(this.apiUrl);

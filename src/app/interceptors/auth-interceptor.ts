@@ -3,12 +3,11 @@ import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, from, switchMap, throwError } from 'rxjs';
 import { AuthService } from '../services/auth';
-
-const API_URL = 'http://localhost:3000';
+import { environment } from '../../environments/environment';
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
-  if (!req.url.startsWith(API_URL)) {
+  if (!req.url.startsWith(environment.apiUrl)) {
     return next(req);
   }
 

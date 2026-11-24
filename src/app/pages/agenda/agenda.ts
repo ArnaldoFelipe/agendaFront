@@ -3,17 +3,18 @@ import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 
 import { FullCalendarModule, FullCalendarComponent } from '@fullcalendar/angular';
-import { CalendarOptions } from '@fullcalendar/core';
+import { CalendarOptions, EventInput } from '@fullcalendar/core';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 
 import { ModalAgendamento } from '../../components/modal-agendamento/modal-agendamento';
-import { Agendamento } from '../../models/agendamento.model';
+import { Agendamento, HorarioLivreDia, StatusAgendamento } from '../../models/agendamento.model';
 import { AgendamentoService } from '../../services/agendamento';
 import { BloqueioService } from '../../services/bloqueio';
 import { Bloqueio } from '../../models/bloqueio.model';
+import { AGENDA } from '../../config/agenda.config';
 import { AuthService } from '../../services/auth';
 import { Router } from '@angular/router';
 import { mensagemDaApi } from '../../utils/erro-api';
@@ -33,6 +34,8 @@ export class Agenda implements OnInit {
   private router = inject(Router);
   private cdr = inject(ChangeDetectorRef);
   private timeoutAlerta: any;
+  private eventosAgendamentos: EventInput[] = [];
+  private eventosBloqueios: EventInput[] = [];
 
   modalAberto = signal(false);
   dataParaOModal = signal<Date | null>(null);
@@ -179,20 +182,31 @@ export class Agenda implements OnInit {
     titleFormat: { year: 'numeric', month: 'long' },
     dayHeaderFormat: { weekday: 'short', day: 'numeric' },
     
+    customButtons: {
+      horariosLivres: {
+        text: 'Horários livres',
+        hint: 'Enviar horários livres',
+        click: () => this.compartilharHorariosLivres()
+      },
+      lembretes: {
+        text: 'Lembretes',
+        hint: 'Lembretes de amanhã',
+        click: () => this.abrirLembretes()
+      }
+    },
+
     headerToolbar: {
       left: 'title',
       center: '',
-      right: 'prev,next today' 
+      right: 'prev,next today horariosLivres,lembretes'
     },
     
-    slotMinTime: '08:00:00',
-    slotMaxTime: '22:00:00',
+    slotMinTime: `${String(AGENDA.horaInicial).padStart(2, '0')}:00:00`,
+    slotMaxTime: `${String(AGENDA.horaFimGrade).padStart(2, '0')}:00:00`,
     allDaySlot: true,
     selectable: true,
     selectAllow: (selectInfo) => {
-      const noFuturo = selectInfo.start.getTime() > new Date().getTime();
-      const estaBloqueado = this.verificarSeEstaBloqueado(selectInfo.start, selectInfo.end);
-      return noFuturo && !estaBloqueado;
+      return selectInfo.start.getTime() > new Date().getTime();
     },
     selectLongPressDelay: 100,
 
@@ -227,28 +241,17 @@ export class Agenda implements OnInit {
           return new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime();
         });
 
-        const eventosAgendamentos = agendamentosOrdenados.map((agendamento, index, array) => {
+        const eventosAgendamentos = agendamentosOrdenados.map((agendamento) => {
           let cor = '#3b82f6';
           if (agendamento.status === 'PENDENTE') cor = '#f59e0b';
           if (agendamento.status === 'CONFIRMADO') cor = '#22c55e';
           if (agendamento.status === 'CANCELADO') cor = '#ef4444';
 
-          const dataInicio = new Date(agendamento.dataHora);
-          let dataFim = new Date(dataInicio.getTime() + (60 * 60 * 1000));
-
-          const proximoAgendamento = array[index + 1];
-          if (proximoAgendamento) {
-            const inicioDoProximo = new Date(proximoAgendamento.dataHora);
-            if (inicioDoProximo < dataFim && inicioDoProximo > dataInicio) {
-              dataFim = inicioDoProximo; 
-            }
-          }
-
           return {
             id: 'AG-' + agendamento.id, // Ajuda a não conflitar com ID de bloqueio
             title: `${agendamento.clienteNome} (${agendamento.status}) ${agendamento.servico ? ' - ' + agendamento.servico : ''}`,
             start: agendamento.dataHora,
-            end: dataFim.toISOString(),
+            end: agendamento.horaFim,
             backgroundColor: cor,
             borderColor: cor,
             extendedProps: { 
@@ -259,34 +262,47 @@ export class Agenda implements OnInit {
         });
 
         
-        const eventosBloqueios = resultado.bloqueios.map(bloqueio => ({
-          id: 'BL-' + bloqueio.id,
-          start: bloqueio.horaInicio,
-          end: bloqueio.horaFim,
-          allDay: bloqueio.diaTodo,
-          backgroundColor: '#e5e7eb',
-          borderColor: '#d1d5db',
-          extendedProps: {
-            tipo: 'BLOQUEIO',
-            dadosCompletos: bloqueio
+        const horaDoDia = (data: Date) => data.toTimeString().substring(0, 8);
+
+        const eventosBloqueios: EventInput[] = resultado.bloqueios.map(bloqueio => {
+          const base: EventInput = {
+            id: 'BL-' + bloqueio.id,
+            backgroundColor: '#e5e7eb',
+            borderColor: '#d1d5db',
+            extendedProps: {
+              tipo: 'BLOQUEIO',
+              dadosCompletos: bloqueio
+            }
+          };
+
+          if (!bloqueio.recorrente) {
+            return {
+              ...base,
+              start: bloqueio.horaInicio,
+              end: bloqueio.horaFim,
+              allDay: bloqueio.diaTodo
+            };
           }
-        }));
+
+          // Recorrente: o FullCalendar repete sozinho nos dias da semana escolhidos.
+          const inicio = new Date(bloqueio.horaInicio as string);
+          const fim = new Date(bloqueio.horaFim as string);
+
+          return {
+            ...base,
+            daysOfWeek: bloqueio.diasSemana ?? [],
+            startRecur: new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate()),
+            allDay: bloqueio.diaTodo,
+            ...(bloqueio.diaTodo ? {} : { startTime: horaDoDia(inicio), endTime: horaDoDia(fim) })
+          };
+        });
 
         // Junta as duas listas e passa para o calendário
-        const todosEventos = [...eventosAgendamentos, ...eventosBloqueios];
+        this.eventosAgendamentos = eventosAgendamentos;
+        this.eventosBloqueios = eventosBloqueios;
+        this.atualizarEventosDaVisao(this.calendarComponent?.getApi()?.view.type ?? this.visaoAtual);
 
-        if (this.calendarComponent && this.calendarComponent.getApi()) {
-          const api = this.calendarComponent.getApi();
-          api.removeAllEventSources(); 
-          api.addEventSource(todosEventos); 
-        } else {
-          this.calendarOptions = {
-            ...this.calendarOptions,
-            events: todosEventos
-          };
-        }
-
-        this.cdr.detectChanges(); 
+        this.cdr.detectChanges();
       },
       error: (erro) => {
         console.error('Erro ao listar agenda completa:', erro);
@@ -323,8 +339,93 @@ export class Agenda implements OnInit {
 
   sincronizarMes() {
     if (this.calendarComponent) {
-      const dataCalendario = this.calendarComponent.getApi().getDate();
+      const api = this.calendarComponent.getApi();
+      const dataCalendario = api.getDate();
       this.mesAtual = String(dataCalendario.getMonth() + 1).padStart(2, '0');
+      this.atualizarEventosDaVisao(api.view.type);
+    }
+  }
+
+  // Lembretes: atendimentos de amanhã, com link de WhatsApp para enviar a mensagem.
+  lembretesAberto = signal(false);
+  carregandoLembretes = signal(false);
+  lembretes = signal<Agendamento[]>([]);
+
+  abrirLembretes() {
+    this.lembretesAberto.set(true);
+    this.carregandoLembretes.set(true);
+
+    this.agendamentoService.listarAgendamentos().subscribe({
+      next: (agendamentos) => {
+        this.lembretes.set(this.filtrarDeAmanha(agendamentos));
+        this.carregandoLembretes.set(false);
+      },
+      error: (erro) => {
+        this.carregandoLembretes.set(false);
+        this.exibirAviso(mensagemDaApi(erro, 'Falha ao carregar os lembretes.'), 'erro');
+      }
+    });
+  }
+
+  fecharLembretes() {
+    this.lembretesAberto.set(false);
+  }
+
+  confirmarLembrete(agendamento: Agendamento) {
+    this.agendamentoService.alterarStatus(agendamento.id, StatusAgendamento.CONFIRMADO).subscribe({
+      next: () => {
+        this.lembretes.update(lista =>
+          lista.map(l => l.id === agendamento.id ? { ...l, status: StatusAgendamento.CONFIRMADO } : l)
+        );
+        // Atualiza também o calendário, para a cor do agendamento mudar na hora.
+        this.carregarAgendamentos();
+      },
+      error: (erro) => this.exibirAviso(mensagemDaApi(erro, 'Falha ao confirmar o agendamento.'), 'erro')
+    });
+  }
+
+  // Link do WhatsApp com a mensagem pronta. Número só com dígitos e DDI 55.
+  linkLembrete(agendamento: Agendamento): string {
+    let numero = agendamento.telefoneWpp.replace(/\D/g, '');
+    if (numero.length <= 11) {
+      numero = '55' + numero;
+    }
+
+    const hora = new Date(agendamento.dataHora).toTimeString().substring(0, 5);
+    const texto = `Oi, ${agendamento.clienteNome}! Passando para lembrar do seu horário amanhã às ${hora}. Podemos confirmar?`;
+
+    return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+  }
+
+  private filtrarDeAmanha(agendamentos: Agendamento[]): Agendamento[] {
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const diaAmanha = this.dataLocalTexto(amanha);
+
+    return agendamentos
+      .filter(a => a.status !== StatusAgendamento.CANCELADO && this.dataLocalTexto(new Date(a.dataHora)) === diaAmanha)
+      .sort((a, b) => new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime());
+  }
+
+  private dataLocalTexto(data: Date): string {
+    const ano = data.getFullYear();
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const dia = String(data.getDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  // Na visão de mês só aparecem os atendimentos; bloqueios ficam nas visões de semana e dia.
+  private atualizarEventosDaVisao(tipoVisao: string) {
+    const api = this.calendarComponent?.getApi();
+    const eventos = tipoVisao === 'dayGridMonth'
+      ? this.eventosAgendamentos
+      : [...this.eventosAgendamentos, ...this.eventosBloqueios];
+
+    if (api) {
+      api.removeAllEventSources();
+      api.addEventSource(eventos);
+    } else {
+      this.calendarOptions = { ...this.calendarOptions, events: eventos };
     }
   }
 
@@ -335,7 +436,7 @@ export class Agenda implements OnInit {
       return;
     }
 
-    this.tentarAbrirModal(selectInfo.start, selectInfo.end);
+    this.tentarAbrirModal(selectInfo.start);
   }
 
   handleEventClick(info: any) {
@@ -379,39 +480,7 @@ export class Agenda implements OnInit {
     this.router.navigate(['/login']);
   }
 
-  private verificarSeEstaBloqueado(inicioSelecionado: Date, fimSelecionado?: Date): boolean {
-    const api = this.calendarComponent?.getApi();
-    if (!api) return false;
-
-    const bloqueios = api.getEvents().filter(e => e.extendedProps['tipo'] === 'BLOQUEIO');
-    const inicio = inicioSelecionado.getTime();
-    const fim = fimSelecionado ? fimSelecionado.getTime() : inicio + (60 * 60 * 1000);
-
-    return bloqueios.some(bloqueio => {
-      if (!bloqueio.start) return false;
-
-      if (bloqueio.allDay) {
-        const mesmaDataInicio =
-          bloqueio.start.getDate() === inicioSelecionado.getDate() &&
-          bloqueio.start.getMonth() === inicioSelecionado.getMonth() &&
-          bloqueio.start.getFullYear() === inicioSelecionado.getFullYear();
-
-        const fimAjustado = new Date(fim - 1);
-        const mesmaDataFim =
-          bloqueio.start.getDate() === fimAjustado.getDate() &&
-          bloqueio.start.getMonth() === fimAjustado.getMonth() &&
-          bloqueio.start.getFullYear() === fimAjustado.getFullYear();
-
-        return mesmaDataInicio || mesmaDataFim;
-      }
-
-      const inicioBloqueio = bloqueio.start.getTime();
-      const fimBloqueio = bloqueio.end ? bloqueio.end.getTime() : inicioBloqueio + (60 * 60 * 1000);
-      return inicio < fimBloqueio && fim > inicioBloqueio;
-    });
-  }
-
-  private tentarAbrirModal(inicio: Date, fim?: Date) {
+  private tentarAbrirModal(inicio: Date) {
     // Impede duplo disparo se o modal já estiver abrindo
     if (this.modalAberto()) return;
 
@@ -424,15 +493,55 @@ export class Agenda implements OnInit {
       return;
     }
 
-    if (this.verificarSeEstaBloqueado(inicio, fim)) {
-      api?.unselect();
-      this.exibirAviso('Este horário (ou dia) encontra-se fechado.', 'erro');
-      return;
-    }
-
     this.agendamentoEdicao.set(null);
     this.bloqueioEdicao.set(null);
     this.dataParaOModal.set(inicio);
     this.modalAberto.set(true);
+  }
+
+  montarTextoHorariosLivres(dias: HorarioLivreDia[]): string {
+    if (!dias.length) {
+      return 'Não há horários livres neste mês.';
+    }
+
+    const nomesDosDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+    const linhas = dias.map(dia => {
+      const [, mes, diaDoMes] = dia.data.split('-');
+      const diaDaSemana = nomesDosDias[new Date(dia.data + 'T12:00:00').getDay()];
+      const intervalos = dia.intervalos.map(i => `${i.inicio} às ${i.fim}`).join(', ');
+      return `${diaDaSemana} ${diaDoMes}/${mes}: ${intervalos}`;
+    });
+
+    return ['Horários disponíveis 📅', ...linhas].join('\n');
+  }
+
+  compartilharHorariosLivres() {
+    this.agendamentoService.listarHorariosLivres().subscribe({
+      next: async (dias) => {
+        const texto = this.montarTextoHorariosLivres(dias);
+
+        try {
+          // No celular abre o menu de compartilhar (WhatsApp); no PC copia direto.
+          const celular = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+          if (celular && navigator.share) {
+            await navigator.share({ text: texto });
+            return;
+          }
+
+          await navigator.clipboard.writeText(texto);
+          this.exibirAviso('Horários copiados!', 'sucesso');
+        } catch (erro: any) {
+          // Cancelar o menu de compartilhar não é erro.
+          if (erro?.name === 'AbortError') return;
+
+          console.error(erro);
+          this.exibirAviso('Não foi possível compartilhar os horários.', 'erro');
+        }
+      },
+      error: (erro) => {
+        this.exibirAviso(mensagemDaApi(erro, 'Falha ao buscar os horários livres.'), 'erro');
+      }
+    });
   }
 }

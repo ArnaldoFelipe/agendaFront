@@ -81,8 +81,57 @@
 
   </div>
 
+  @if (lembretesAberto()) {
+    <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+      <div class="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col">
+
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-xl font-bold text-gray-800">Lembretes de amanhã</h2>
+            <p class="text-sm text-gray-500">Toque em Enviar para abrir o WhatsApp</p>
+          </div>
+          <button type="button" (click)="fecharLembretes()"
+                  class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        @if (carregandoLembretes()) {
+          <p class="text-sm text-gray-500 py-8 text-center">Carregando...</p>
+        } @else if (lembretes().length === 0) {
+          <p class="text-sm text-gray-500 py-8 text-center">Nenhum atendimento marcado para amanhã.</p>
+        } @else {
+          <ul class="overflow-y-auto divide-y divide-gray-100">
+            @for (item of lembretes(); track item.id) {
+              <li class="py-3 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-gray-800 truncate">{{ item.clienteNome }}</p>
+                  <p class="text-xs text-gray-500">
+                    {{ item.dataHora | date:'HH:mm' }} · {{ item.status | titlecase }}
+                  </p>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                  @if (item.status !== 'CONFIRMADO') {
+                    <button type="button" (click)="confirmarLembrete(item)"
+                            class="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
+                      Confirmar
+                    </button>
+                  }
+                  <a [href]="linkLembrete(item)" target="_blank" rel="noopener"
+                     class="text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-lg transition-colors">
+                    Enviar
+                  </a>
+                </div>
+              </li>
+            }
+          </ul>
+        }
+
+      </div>
+    </div>
+  }
+
   @if (modalAberto()) {
-    <app-modal-agendamento 
+    <app-modal-agendamento
       [dataSelecionada]="dataParaOModal()" 
       [agendamento]="agendamentoEdicao()"
       [bloqueio]="bloqueioEdicao()"

@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
-import { supabaseConfig } from '../config/supabase.config';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root',
@@ -8,8 +8,8 @@ import { supabaseConfig } from '../config/supabase.config';
 export class AuthService {
 
   private supabase: SupabaseClient = createClient(
-    supabaseConfig.url,
-    supabaseConfig.publishableKey
+    environment.supaBaseUrl,
+    environment.supaBaseKey
   );
 
   // Retorna true se existir uma sessão ativa (o Supabase guarda a sessão no navegador).

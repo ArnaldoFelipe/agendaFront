@@ -1,7 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Agendamento, CreateAgendamentoDto, StatusAgendamento } from '../models/agendamento.model';
+import { Agendamento, CreateAgendamentoDto, HorarioLivreDia, StatusAgendamento } from '../models/agendamento.model';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root',
@@ -10,7 +11,7 @@ export class AgendamentoService {
 
   private http = inject(HttpClient);
 
-  private apiUrl = 'http://localhost:3000/agendamentos';
+  private apiUrl = `${environment.apiUrl}/agendamentos`;
 
   criarAgendamento(dados: CreateAgendamentoDto): Observable<Agendamento>{
     return this.http.post<Agendamento>(this.apiUrl, dados);
@@ -38,5 +39,9 @@ export class AgendamentoService {
 
   cancelarAgendamento(id: string): Observable<Agendamento> {
     return this.http.patch<Agendamento>(`${this.apiUrl}/${id}/cancelar`, {});
+  }
+
+  listarHorariosLivres(): Observable<HorarioLivreDia[]> {
+    return this.http.get<HorarioLivreDia[]>(`${this.apiUrl}/horarios-livres`);
   }
 }

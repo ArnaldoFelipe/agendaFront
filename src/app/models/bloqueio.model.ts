@@ -4,6 +4,8 @@ export interface CreateBloqueioDto {
     data?: string;
     horaInicio?: string;
     horaFim?: string;
+    recorrente?: boolean;
+    diasSemana?: number[] | null;
 }
 
 export interface Bloqueio extends CreateBloqueioDto{
